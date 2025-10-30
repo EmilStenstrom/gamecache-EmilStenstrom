@@ -1,9 +1,11 @@
 name: Update mybgg.sqlite.gz with BGG data
 
-on:
-  schedule:
-    - cron: '0 * * * *' # Runs every hour
-  workflow_dispatch:
+# Workflow temporarily disabled
+on: []
+# on:
+#   schedule:
+#     - cron: '0 * * * *' # Runs every hour
+#   workflow_dispatch:
 jobs:
   index:
     runs-on: ubuntu-latest
