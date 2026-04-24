@@ -2,6 +2,7 @@ import logging
 import random
 import time
 from xml.etree.ElementTree import fromstring
+from urllib.parse import unquote
 
 import declxml as xml
 
@@ -12,25 +13,36 @@ logger = logging.getLogger(__name__)
 class BGGClient:
     BASE_URL = "https://www.boardgamegeek.com/xmlapi2"
 
-    def __init__(self, cache=None, debug=False):
+    def __init__(self, cache=None, debug=False, token=None):
+        # Set up headers for authentication
+        # BGG XML API requires: Authorization: Bearer {token}
+        # See: https://boardgamegeek.com/using_the_xml_api
+        headers = {}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+        
         if not cache:
-            self.requester = HttpSession()
+            self.requester = HttpSession(headers=headers)
         else:
+            # Pass headers to cached client for authentication
             self.requester = cache.cache
+            self.requester.headers = headers
+
+        self.token = token
 
         if debug:
             logging.basicConfig(level=logging.DEBUG)
 
     def collection(self, user_name, **kwargs):
         params = kwargs.copy()
-        params["username"] = user_name
+        params["username"] = unquote(user_name)
         data = self._make_request("/collection?version=1", params)
         collection = self._collection_to_games(data)
         return collection
 
     def plays(self, user_name):
         params = {
-            "username": user_name,
+            "username": unquote(user_name),
             "page": 1,
         }
         all_plays = []
@@ -100,7 +112,22 @@ class BGGClient:
         except Exception as e:
             # Handle both requests exceptions and our simple cache exceptions
             error_message = str(e)
-            
+
+            # Check for authentication errors - fail immediately with helpful message
+            if "401" in error_message or "Unauthorized" in error_message:
+                if not self.token:
+                    raise BGGException(
+                        "BGG API authentication required (401 Unauthorized). "
+                        "Please run: python scripts/setup_bgg_token.py"
+                    )
+                else:
+                    raise BGGException(
+                        "BGG API authentication failed (401 Unauthorized). "
+                        f"Token present but rejected by BGG. "
+                        f"Try regenerating your token: python scripts/setup_bgg_token.py\n"
+                        f"Token being used: {self.token[:8]}..."
+                    )
+
             # Check for Too Many Requests (429)
             if "429" in error_message or "Too Many Requests" in error_message:
                 if tries < 3:
@@ -306,6 +333,8 @@ class BGGClient:
                             alias="rating"
                         ),
                         xml.string("playingtime", attribute="value", alias="playing_time"),
+                        xml.string("minplayers", attribute="value", alias="min_players"),
+                        xml.string("maxplayers", attribute="value", alias="max_players"),
                         xml.string("minage", attribute="value", alias="min_age"),
                     ],
                     required=False,
